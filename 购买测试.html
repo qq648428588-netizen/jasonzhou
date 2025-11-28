@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>产品购买测试工具 (Buying Test)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
+        body { font-family: 'Noto Sans SC', sans-serif; background-color: #f5f5f5; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* 报告渲染区域修复 */
+        #report-wrapper {
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 9999;
+            opacity: 0;
+            pointer-events: none; /* 使其不可交互 */
+            width: 100vw;
+            height: 100vh;
+        }
+        #report-canvas {
+            /* 报告的固定宽度和响应式调整 */
+            background: white; 
+            width: 800px; 
+            max-width: 95vw; /* 确保在小屏幕上不会溢出 */
+            margin: 40px auto; 
+            padding: 40px; 
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+
+        .loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.9); z-index: 50;
+            display: flex; justify-content: center; align-items: center; flex-direction: column;
+        }
+    </style>
+</head>
+<body class="text-gray-800">
+    <div class="max-w-md mx-auto bg-white min-h-screen shadow-lg flex flex-col relative" id="app-container">
+        <div class="bg-blue-600 text-white p-4 sticky top-0 z-20 shadow-md">
+            <div class="flex justify-between items-center">
+                <h1 class="text-lg font-bold"><i class="fas fa-clipboard-check mr-2"></i>购买测试工具</h1>
+                <span id="step-indicator" class="text-xs bg-blue-700 px-2 py-1 rounded">准备</span>
+            </div>
+        </div>
+
+        <div class="flex-1 p-4 overflow-y-auto" id="main-content">
+            <!-- STEP 1: HFB Selection -->
+            <div id="step-1" class="space-y-6">
+                <div class="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                    <h2 class="font-bold text-lg mb-2 text-blue-800">开始测试</h2>
+                    <p class="text-sm text-gray-600 mb-4">请选择 HFB，系统将从录入的数据库中随机抽取 10 个产品。</p>
+                    
+                    <label class="block text-sm font-medium text-gray-700 mb-1">选择 HFB</label>
+                    <select id="hfb-select" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                        <option value="">-- 请选择 --</option>
+                        <!-- JS 自动生成 -->
+                    </select>
+                </div>
+
+                <div class="text-center">
+                    <button onclick="startTest()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow transition transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed" id="btn-start" disabled>
+                        生成测试列表 <i class="fas fa-arrow-right ml-2"></i>
+                    </button>
+                </div>
+                
+                <div class="mt-8 text-xs text-gray-400 text-center">
+                    数据库产品总数: <span id="data-count">0</span>
+                </div>
+            </div>
+
+            <!-- STEP 2: Audit Item (Single Item View) -->
+            <div id="step-2" class="hidden space-y-4">
+                <div class="flex justify-between items-start mb-2">
+                    <h2 class="font-bold text-lg" id="current-item-header"></h2>
+                    <button onclick="resetApp()" class="text-sm text-red-500 hover:underline">重置</button>
+                </div>
+                <div id="current-item-details" class="bg-white p-4 rounded-lg shadow border border-gray-200 space-y-6 pb-20">
+                    <!-- Checklist content will be rendered here -->
+                </div>
+            </div>
+
+            <!-- STEP 3: Report Preview -->
+            <div id="step-3" class="hidden text-center py-10">
+                <div class="mb-6 text-green-600 text-5xl"><i class="fas fa-check-circle"></i></div>
+                <h2 class="text-2xl font-bold mb-2">测试完成！</h2>
+                <p class="text-gray-600 mb-8">准备导出报告。</p>
+                <button onclick="exportReport()" class="bg-green-600 text-white py-3 px-8 rounded-full font-bold shadow-lg hover:bg-green-700 transition">
+                    <i class="fas fa-file-image mr-2"></i> 导出图片报告
+                </button>
+                <button onclick="backToEdit()" class="block w-full mt-4 text-gray-500 text-sm">返回修改</button>
+            </div>
+        </div>
+
+        <div id="audit-footer" class="hidden sticky bottom-0 bg-white border-t p-4 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+            <div class="flex justify-between items-center">
+                <button onclick="previousItem()" id="btn-previous" class="text-sm text-gray-500 hover:underline disabled:opacity-50" disabled>
+                    <i class="fas fa-arrow-left mr-1"></i> 上一个
+                </button>
+                <span class="text-sm text-gray-500">进度: <span id="progress-text">0/10</span></span>
+                <button onclick="nextItem()" id="btn-next" class="bg-gray-400 text-white px-6 py-2 rounded-lg font-medium shadow transition disabled:opacity-50" disabled>
+                    下一个 <i class="fas fa-arrow-right ml-2"></i>
+                </button>
+            </div>
+            <div class="w-full bg-gray-200 h-1 mt-2 rounded-full overflow-hidden">
+                <div id="progress-bar" class="bg-green-500 h-full w-0 transition-all duration-300"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Report Rendering Area (CSS handles the hiding) -->
+    <div id="report-wrapper">
+        <div id="report-canvas">
+            <div class="border-b-4 border-yellow-400 pb-4 mb-6 flex justify-between items-end">
+                <div>
+                    <h1 class="text-3xl font-bold text-blue-800 uppercase tracking-wider">购买测试报告</h1>
+                    <p class="text-gray-500 mt-1">Buying Test Report</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-sm text-gray-600">日期: <span id="report-date"></span></p>
+                    <p class="text-sm font-bold text-blue-600">HFB: <span id="report-hfb"></span></p>
+                </div>
+            </div>
+            <div class="grid grid-cols-3 gap-4 mb-8">
+                <div class="bg-gray-100 p-4 rounded text-center">
+                    <div class="text-2xl font-bold text-gray-800" id="report-total">10</div>
+                    <div class="text-xs text-gray-500 uppercase">Total Items</div>
+                </div>
+                <div class="bg-green-100 p-4 rounded text-center">
+                    <div class="text-2xl font-bold text-green-600" id="report-pass">0</div>
+                    <div class="text-xs text-green-700 uppercase">Passed</div>
+                </div>
+                <div class="bg-red-100 p-4 rounded text-center">
+                    <div class="text-2xl font-bold text-red-600" id="report-fail">0</div>
+                    <div class="text-xs text-red-700 uppercase">Issues Found</div>
+                </div>
+            </div>
+            <div id="report-details" class="space-y-6"></div>
+            <div class="mt-10 pt-4 border-t text-center text-gray-400 text-sm">Generated by Buying Test Tool</div>
+        </div>
+    </div>
+
+    <div id="loading" class="loading-overlay hidden">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+        <p class="text-gray-600 font-medium">正在生成报告...</p>
+    </div>
+
+    <script>
+        // ==========================================
+        //  配置区域：请在此处粘贴你的真实数据
+        // ==========================================
+       
+        // ==========================================
+        //  配置区域：Excel 导入数据 (2025/11/28)
+        // ==========================================
+        const allProducts = [
+    {
+        "hfb": "HFB04",
+        "name": "MALM 马尔姆 4屉柜 80X100 白色",
+        "articleNo": "20354646"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "PAX 帕克思 衣柜框架 100X58X236 白色",
+        "articleNo": "10355118"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "马尔姆 6屉柜 160X78 白色",
+        "articleNo": "70354644"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "松耶桑德 4屉柜 82X104 褐色",
+        "articleNo": "50366775"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "PAX 帕克思 定制衣柜面板 白色",
+        "articleNo": "40493646"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "穆斯肯 N 双门衣柜带3屉 124X60X201 褐色",
+        "articleNo": "70378683"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "穆斯肯 N 双门衣柜带3屉 124X60X201 白色",
+        "articleNo": "50378684"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "MALM 马尔姆 6屉柜 80X123 白色",
+        "articleNo": "40354645"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "松耶桑德 6屉柜 82X126 褐色",
+        "articleNo": "70366779"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "RIGGA丽加 晒衣架 白色",
+        "articleNo": "30231631"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "马尔姆 三斗抽屉柜 80X78 白色",
+        "articleNo": "90354643"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "PAX 帕克思 衣柜框架 50X58X236 白色",
+        "articleNo": "60355130"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "FLISBERGET 弗里伯加 柜门 50X229 淡米色",
+        "articleNo": "70346767"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "康普蒙 搁板 100X58 白色",
+        "articleNo": "50277958"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "KOMPL 康普蒙 缓慢关闭合叶",
+        "articleNo": "60260373"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "KLEPPSTAD 克勒普斯塔 三门衣柜 117X176 白色",
+        "articleNo": "80441759"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "KLEPPSTAD 克勒普斯塔 鞋柜/储藏 80X35X117 白色",
+        "articleNo": "90508914"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "PAX 帕克思 衣柜框架 100X58X236 米黄色",
+        "articleNo": "80509023"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "松耶桑德 6屉柜 161X81 褐色",
+        "articleNo": "80366793"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "IDANÄS 宜达奈 6屉柜 162X95 深褐色 着色",
+        "articleNo": "50458708"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "KLEPPSTAD 克勒普斯塔 双门衣柜 79X176 白色",
+        "articleNo": "10437237"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "马尔姆 梳妆台 120X41 白色",
+        "articleNo": "40355409"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "松耶桑德 4屉柜 82X104 白色",
+        "articleNo": "40366790"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "FORSAND 弗桑 柜门 50X229 白色",
+        "articleNo": "80391090"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "RÅDMANSÖ 拉曼斯 6屉柜 159x48x81 褐色 胡桃木纹",
+        "articleNo": "90593827"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "PAX 帕克思 衣柜框架 100X58X201 白色",
+        "articleNo": "70355115"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "马尔姆 两斗屉柜 40X55 白色",
+        "articleNo": "10354642"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "PAX 帕克思 衣柜框架 100X58X236 仿白色橡木纹",
+        "articleNo": "90355119"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "BRUKSVARA 布瓦拉 2门2屉衣柜 79X57X201 白色",
+        "articleNo": "90556047"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "SYVDE 斯维德 梳妆台 100X48 白色",
+        "articleNo": "439562"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "松耶桑德 6屉柜 161X81 白色",
+        "articleNo": "366792"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "PAX 帕克思 衣柜框架 100X58X236 深灰色",
+        "articleNo": "90509126"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "TYSSEDAL 提赛尔 柜门 50X229 白色",
+        "articleNo": "20298127"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "康普蒙 密网篮 100X58 白色",
+        "articleNo": "30400761"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "康普蒙 挂衣杆 100 白色",
+        "articleNo": "50256890"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "PAX 帕克思 衣柜框架 75X58X236 白色",
+        "articleNo": "10355142"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "百灵 4屉柜 78X124 白色/毛玻璃",
+        "articleNo": "30355419"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "KULLEN库伦 N 五斗抽屉柜 70X112 白色",
+        "articleNo": "90355732"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "VIKANES 维肯斯 柜门 50X229 白色",
+        "articleNo": "60311565"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "BOAXEL 博阿克塞 托架 40 白色",
+        "articleNo": "40453513"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "松耶桑德 6屉柜 82X126 白色",
+        "articleNo": "30366781"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "PAX 帕克思 衣柜框架 100X58X201 仿白色橡木纹",
+        "articleNo": "50355116"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "康普蒙 密网篮 50X58 白色",
+        "articleNo": "40400765"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "MACKAPÄR 马凯帕 N 衣架鞋储单元 78X32X200 白色",
+        "articleNo": "70530987"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "MALM 马尔姆 6屉柜 80X123 黑褐色",
+        "articleNo": "60354625"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "RÅDMANSÖ 拉曼斯 五斗抽屉柜 70x48x132 褐 胡桃木纹",
+        "articleNo": "10593826"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "松耶桑德 三斗抽屉柜 82X81 褐色",
+        "articleNo": "50366841"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "伯尔思波 柜门 50X229 白色",
+        "articleNo": "70162999"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "KOMPL 康普蒙 储物篮拉杆 58 白色 2件",
+        "articleNo": "90263247"
+    },
+    {
+        "hfb": "HFB04",
+        "name": "康普蒙 搁板 50X58 白色",
+        "articleNo": "10277960"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VALEVÅG 瓦勒沃格 袋簧床垫 180x200 超硬/浅蓝色",
+        "articleNo": "50569990"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VALEVÅG 瓦勒沃格 袋簧床垫 150x200 超硬/浅蓝色",
+        "articleNo": "70569989"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VÅGSTRANDA 沃斯棠 袋簧床垫 180x200 超硬/浅蓝色",
+        "articleNo": "70569994"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "瓦拉比格 袋簧床垫 150x200 带椰壳纤维 超硬/浅蓝",
+        "articleNo": "90554519"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "KORTG库佳顿N高箱气压床180X200KIMSTAD金斯托灰白",
+        "articleNo": "90570835"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VATNESTRÖM瓦内斯托袋簧床垫180X200加硬/自然",
+        "articleNo": "10478483"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "HEMNES 汉尼斯 N 坐卧两用床框架带3屉 80X200 白色",
+        "articleNo": "70349327"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VESTERÖY 韦斯特吕伊 袋簧床垫 150X200 加硬/浅蓝",
+        "articleNo": "50470060"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VITMÅSEN维特冒森袋装弹簧床垫180X200乳胶加硬/浅蓝",
+        "articleNo": "60552116"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VÅGSTRANDA 沃斯棠 袋簧床垫 150x200 超硬/浅蓝色",
+        "articleNo": "90569993"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "LURÖY 鲁瑞 床板架 150X200",
+        "articleNo": "277197"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "ÅFJÄLL 阿菲尔 海绵床垫 80X200 硬型/白色",
+        "articleNo": "60568631"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VÅGSTRANDA 沃斯棠 袋簧床垫 180X200 加硬/浅蓝色",
+        "articleNo": "70470380"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VITMÅSEN维特冒森袋装弹簧床垫150X200乳胶加硬/浅蓝",
+        "articleNo": "80552115"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VESTERÖY 韦斯特吕伊 袋簧床垫 180X200 加硬/浅蓝",
+        "articleNo": "470114"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "瓦拉比格 袋簧床垫180x200椰壳纤维超硬浅蓝",
+        "articleNo": "80569984"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "FYRESDAL 费斯多 N 坐卧床架 80X200 黑色",
+        "articleNo": "424363"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "LURÖY 鲁瑞 床板架 90X200",
+        "articleNo": "80163173"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VALEVÅG 瓦勒沃格 袋簧床垫 120x200 超硬/浅蓝色",
+        "articleNo": "90569988"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "ÅRBERGET 奥贝盖特 天然乳胶床垫150X200中等硬度白",
+        "articleNo": "10552109"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "STJÄRNÖ 夏尔诺 床架 180X200 煤黑色",
+        "articleNo": "20570184"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "ÅKLABBEN 阿卡拉本 天然乳胶床垫 180X200中等硬度白",
+        "articleNo": "30552113"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "ÅNNFJÄLLET奥恩菲亚特 椰壳纤维床垫 150x200超硬/白",
+        "articleNo": "50568226"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "STJÄRNÖ 夏尔诺 床架 150X200 煤黑色",
+        "articleNo": "70570191"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "ÅNNFJÄLLET奥恩菲亚特 椰壳纤维床垫180x200超硬/白",
+        "articleNo": "80569535"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "LÖNSET 朗塞特 床板架 90X200",
+        "articleNo": "30278708"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "STJÄRNÖ 夏尔诺 床架 150X200 白色",
+        "articleNo": "60579050"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "奈斯顿 床侧板 200 白色",
+        "articleNo": "80330662"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VATNESTRÖM瓦内斯托袋簧床垫150X200加硬/自然",
+        "articleNo": "10478478"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "瓦拉比格 袋簧床垫 120x200 带椰壳纤维 超硬/浅蓝",
+        "articleNo": "30569986"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "STJÄRNÖ 夏尔诺 床架 180X200 白色",
+        "articleNo": "40579051"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "奈斯顿 床头/床尾板 150 白色",
+        "articleNo": "80330657"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "ÅNNFJÄLLET 奥恩菲亚特 椰壳纤维床垫120x200超硬/白",
+        "articleNo": "40569537"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "奈斯顿 床头/床尾板 120 白色",
+        "articleNo": "330661"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VALEVÅG 瓦勒沃格 袋簧床垫 180X200 加硬/浅蓝色",
+        "articleNo": "80470006"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VESTERÖY 韦斯特吕伊 袋簧床垫 120X200 加硬/浅蓝",
+        "articleNo": "60470050"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VÅGSTRANDA 沃斯棠 袋簧床垫 150X200 加硬/浅蓝色",
+        "articleNo": "50450750"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "SKORVA斯科瓦 床中挺 电镀",
+        "articleNo": "70170503"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "HEMNES 汉尼斯 坐卧两用床框架带3屉 80X200 灰色",
+        "articleNo": "30427831"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "赛格松 软包床架 150X200 迪瑟略 褐色",
+        "articleNo": "50490379"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "ÅKLABBEN 阿卡拉本天然乳胶床垫150X200中等硬度白",
+        "articleNo": "50552112"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VÅGSTRANDA 沃斯棠 袋簧床垫 120x200 超硬/浅蓝色",
+        "articleNo": "10569992"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "VESTMARKA 维斯特玛 弹簧床垫 150X200 加硬/浅蓝色",
+        "articleNo": "30451265"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "BRUKSVARA 布瓦拉 袋簧床垫 150X200 加硬 白色",
+        "articleNo": "30556427"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "LÖNSET 朗塞特 床板架 150X200",
+        "articleNo": "10278714"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "HEMNES 汉尼斯 床架 120X200 白色漆",
+        "articleNo": "80354380"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "松耶桑德 床架 180X200 褐色",
+        "articleNo": "372528"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "ÅRBERGET 奥贝盖特天然乳胶床垫180X200中等硬度白",
+        "articleNo": "90552110"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "BRUKSVARA 布瓦拉 袋簧床垫 180X200 加硬 白色",
+        "articleNo": "30558209"
+    },
+    {
+        "hfb": "HFB05",
+        "name": "BRIMNES百灵NN坐卧两用床框架+双屉80X200白",
+        "articleNo": "30503655"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "LILLABO利乐宝 N 基础型玩具火车20件 多色",
+        "articleNo": "70320055"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "LILLABO利乐宝 N 玩具火车3件",
+        "articleNo": "30320095"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "BAGIS 巴吉思 NN 儿童衣架 多色 8件",
+        "articleNo": "30591015"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "LILLABO 利乐宝 N 电动车",
+        "articleNo": "30320057"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "BLÅHAJ 布罗艾 NNN 毛绒玩具 100 鲨鱼",
+        "articleNo": "10373589"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "CIRKUSTÄLT 勒克斯塔 N 儿童帐蓬 红色/蓝色 白色",
+        "articleNo": "20581366"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "古西格 格登 毛绒玩具 40 狗/金毛寻回犬",
+        "articleNo": "50169341"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "SANDLÖPARE 桑罗帕瑞 毛绒玩具 24 猎豹幼崽/米黄色",
+        "articleNo": "80603073"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "LILLABO利乐宝 玩具火车带轨45件",
+        "articleNo": "330067"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "KALAS 卡拉斯 NN 盘 多色 6件",
+        "articleNo": "20378671"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "古西格 格登 毛绒玩具 70 狗/金毛寻回犬",
+        "articleNo": "30169342"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "BLÅVINGAD 布洛凡格 毛绒玩具 50 章鱼/黄色",
+        "articleNo": "522108"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "BLÅHAJ 布罗艾 N 毛绒玩具 55 幼鲨",
+        "articleNo": "540664"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "SANDLÖPARE 桑罗帕瑞 毛绒玩具 20 狐獴/米黄色",
+        "articleNo": "40603065"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "DJUNGELSKOG 尤恩格斯库格 手套玩偶 蛇形/缅甸蟒",
+        "articleNo": "40402849"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "里夫利 毛绒玩具 57 狗/西伯利亚爱斯基摩犬",
+        "articleNo": "30297995"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "LILLABO利乐宝车玩具4件跑车/校车回收卡车/警车/多",
+        "articleNo": "30589362"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "KRAMIG克拉格 毛绒玩具 白色/黑色",
+        "articleNo": "10221317"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "SANDLÖPARE 桑罗帕瑞 毛绒玩具 45 长颈鹿幼崽/褐色",
+        "articleNo": "10603057"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "SANDLÖPARE 桑罗帕瑞 毛绒玩具 32 黑猩猩/黑色",
+        "articleNo": "10603081"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "SKOGSDUVA 思克蒂瓦 毛绒玩具 21 刺猬/米黄色",
+        "articleNo": "70576904"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "福丽萨特 童桌 可调节",
+        "articleNo": "60293062"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "PIPLÄRKA 皮莱卡 书桌 80X63 可倾斜",
+        "articleNo": "20528500"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "BUSENKEL 布森肯 地毯 130X160 马戏彩服图案/多色",
+        "articleNo": "40520428"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "BERGLÄRKA 贝利徕加 桌面底架 100",
+        "articleNo": "20531654"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "FÖRSIKTIG 福思迪 儿童防滑凳 白色/天蓝色",
+        "articleNo": "90591319"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "DVÄRGHARE 德瓦里霍 毛绒玩具 21 兔子/米黄色",
+        "articleNo": "597066"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "SANDLÖPARE 桑罗帕瑞 毛绒玩具 70 长颈鹿/褐色",
+        "articleNo": "60603069"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "雅特斯托 NNN 毛绒玩具 象/灰色",
+        "articleNo": "50373592"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "SNUTTIG思纳迪 毛绒玩具 北极熊/白色",
+        "articleNo": "50298102"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "TROFAST舒法特 N 架子 99X44X55 白色",
+        "articleNo": "80352116"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "KALAS 卡拉斯 NN 碗 多色 6件",
+        "articleNo": "60378669"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "SANDLÖPARE 桑罗帕瑞 毛绒玩具 8 狐獴/迷你 米黄色",
+        "articleNo": "40609576"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "KALAS 卡拉斯 NN 杯 多色 6件",
+        "articleNo": "40378670"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "MÅLA 莫拉 N 书写板 软木",
+        "articleNo": "10488967"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "LIVLIG 里夫利N毛绒玩具26狗/西伯利亚爱斯基摩犬",
+        "articleNo": "70414271"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "SANDLÖPARE 桑罗帕瑞 毛绒玩具 50 猎豹/米黄色",
+        "articleNo": "30603061"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "费布勒 比约 N 毛绒玩具 21 米黄色",
+        "articleNo": "70215530"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "TROFAST 舒法特 N 架子 46X30X95 白色",
+        "articleNo": "30352114"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "SANDBI 桑德比 毛绒玩具 球形/多色",
+        "articleNo": "50564474"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "BLÅVINGAD 布洛凡格 毛绒玩具 100 蓝鲸",
+        "articleNo": "80522114"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "DALRIPA 达里帕 书架 60X150 白色",
+        "articleNo": "90528506"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "KALAS 卡拉斯 NN 餐具18件 多色",
+        "articleNo": "378672"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "FABLER BJÖRN 费布勒 比约 毛绒玩具 21 粉红色",
+        "articleNo": "90533027"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "丽乐普鲁 毛绒玩具 猫 灰色/白色",
+        "articleNo": "80260452"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "LILLABO 利乐宝 车玩具3件套 消防车 跑车/拖车 多",
+        "articleNo": "50589356"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "MINNEN米隆 N 可加长床 80X200 白色",
+        "articleNo": "70304239"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "费德蒙 靠垫 59X34 浅蓝色",
+        "articleNo": "264430"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "TROFAST 舒法特 N 盖子 40x28 白色",
+        "articleNo": "80582080"
+    },
+    {
+        "hfb": "HFB09",
+        "name": "约姆辛特 可加长床袋装弹簧床垫 80X200",
+        "articleNo": "10348590"
+    }
+];
+
+        // 自动提取去重后的 HFB 列表
+        const HFBs = [...new Set(allProducts.map(p => p.hfb))].sort();
+
+        // 5个检查问题
+        const checklistQuestions = [
+            "产品是否正确组装，干净且状态良好？",
+            "是否有清晰的关于产品价格，商品质保，服务产品等购买信息的沟通？",
+            "产品的益处是否在功能上或在适用的情况下有明确的沟通和可见的sign？",
+            "产品是否在正确的位置有充足库存可以提/拿取？",
+            "产品在店内的沟通和在IKEA目录册或网站上的沟通信息是否一致？"
+        ];
+
+        // --- State Management ---
+        // 新增 currentItemIndex 来跟踪当前审核的产品
+        let state = { selectedHFB: null, testItems: [], currentStep: 1, currentItemIndex: 0 };
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const hfbSelect = document.getElementById('hfb-select');
+            
+            HFBs.forEach(hfb => {
+                const option = document.createElement('option');
+                option.value = hfb;
+                option.textContent = hfb;
+                hfbSelect.appendChild(option);
+            });
+
+            document.getElementById('data-count').textContent = allProducts.length;
+
+            hfbSelect.addEventListener('change', (e) => {
+                state.selectedHFB = e.target.value;
+                document.getElementById('btn-start').disabled = !e.target.value;
+            });
+        });
+
+        // --- Functions ---
+        function startTest() {
+            if (!state.selectedHFB) return;
+            const pool = allProducts.filter(p => p.hfb === state.selectedHFB);
+            
+            // 如果数量少于10个，就全部显示；否则随机取10个
+            const needed = 10;
+            const shuffled = [...pool].sort(() => 0.5 - Math.random());
+            const selected = shuffled.slice(0, needed);
+            
+            if (selected.length === 0) { 
+                showMessageBox("提示", "该分类下没有数据，请重新选择 HFB。");
+                return; 
+            }
+
+            state.testItems = selected.map(product => ({
+                product: product,
+                audit: checklistQuestions.map(q => ({ status: null, beforeImg: null, afterImg: null, question: q })),
+            }));
+
+            state.currentItemIndex = 0; // 重置到第一个
+            state.currentStep = 2;
+            document.getElementById('step-1').classList.add('hidden');
+            document.getElementById('step-2').classList.remove('hidden');
+            document.getElementById('audit-footer').classList.remove('hidden');
+            document.getElementById('step-indicator').textContent = "进行中";
+            document.getElementById('step-indicator').className = "text-xs bg-orange-500 px-2 py-1 rounded";
+            
+            renderTestStep(); // 渲染第一个产品
+            updateProgress();
+        }
+
+        /** 渲染当前步骤（单项产品审核）的UI */
+        function renderTestStep() {
+            const itemIndex = state.currentItemIndex;
+            const currentItem = state.testItems[itemIndex];
+
+            // 1. 更新顶部 Header
+            document.getElementById('current-item-header').innerHTML = `
+                <span class="text-xs text-gray-400 block mb-1">产品 ${itemIndex + 1}/${state.testItems.length} | 货号: ${currentItem.product.articleNo}</span>
+                <span class="font-bold text-gray-800">${currentItem.product.name}</span>
+            `;
+
+            // 2. 渲染 Checklist 详情
+            const listContainer = document.getElementById('current-item-details');
+            listContainer.innerHTML = '';
+            
+            currentItem.audit.forEach((qItem, qIndex) => {
+                const qDiv = document.createElement('div');
+                qDiv.className = "border-b border-gray-100 pb-4 last:border-0 last:pb-0";
+                qDiv.innerHTML = `<p class="text-sm text-gray-700 font-medium mb-3">${qIndex + 1}. ${qItem.question}</p>`;
+                
+                const btnContainer = document.createElement('div');
+                btnContainer.className = "flex gap-2 mb-3";
+                
+                // 绑定 updateResult 时传递当前 index
+                const passBtn = createBtn('合格', true, qItem.status, () => updateResult(itemIndex, qIndex, true));
+                const failBtn = createBtn('不合格', false, qItem.status, () => updateResult(itemIndex, qIndex, false));
+                btnContainer.append(passBtn, failBtn);
+                qDiv.appendChild(btnContainer);
+
+                if (qItem.status === false) {
+                    const photoArea = document.createElement('div');
+                    photoArea.className = "grid grid-cols-2 gap-3 mt-3";
+                    
+                    // 绑定回调时，更新当前产品的状态并重新渲染
+                    photoArea.appendChild(createPhotoUploader("Before", qItem.beforeImg, (base64) => {
+                        state.testItems[itemIndex].audit[qIndex].beforeImg = base64; 
+                        renderTestStep();
+                        updateNavigationButtons();
+                    }));
+                    photoArea.appendChild(createPhotoUploader("After", qItem.afterImg, (base64) => {
+                        state.testItems[itemIndex].audit[qIndex].afterImg = base64; 
+                        renderTestStep();
+                        updateNavigationButtons();
+                    }));
+                    qDiv.appendChild(photoArea);
+                }
+                listContainer.appendChild(qDiv);
+            });
+            
+            // 3. 更新导航按钮状态
+            updateNavigationButtons();
+        }
+
+        function createBtn(text, isPass, currentStatus, onClick) {
+            const btn = document.createElement('button');
+            const isActive = currentStatus === isPass;
+            let colors = isActive 
+                ? (isPass ? 'bg-green-500 text-white border-green-500' : 'bg-red-500 text-white border-red-500')
+                : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-50';
+            btn.className = `flex-1 py-2 rounded border text-sm flex items-center justify-center gap-2 ${colors}`;
+            btn.innerHTML = `<i class="fas fa-${isPass?'check':'times'}"></i> ${text}`;
+            btn.onclick = onClick;
+            return btn;
+        }
+
+        function createPhotoUploader(label, currentImg, callback) {
+            const container = document.createElement('div');
+            if (currentImg) {
+                container.innerHTML = `<div class="relative w-full h-24 rounded overflow-hidden border border-gray-300 bg-gray-100 group"><img src="${currentImg}" class="w-full h-full object-cover"><div class="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition"><button class="text-white text-xs bg-red-500 px-2 py-1 rounded">删除</button></div><span class="absolute bottom-0 right-0 bg-black bg-opacity-60 text-white text-[10px] px-1">${label}</span></div>`;
+                container.querySelector('button').onclick = () => callback(null);
+            } else {
+                const inputId = `file-${Math.random().toString(36).substr(2, 9)}`;
+                container.innerHTML = `<input type="file" accept="image/*" id="${inputId}" class="hidden"><label for="${inputId}" class="w-full h-24 border-2 border-dashed border-gray-300 rounded flex flex-col items-center justify-center text-gray-400 cursor-pointer hover:border-blue-400 hover:text-blue-400 transition bg-gray-50"><i class="fas fa-camera text-xl mb-1"></i><span class="text-xs">上传 ${label}</span></label>`;
+                container.querySelector('input').onchange = (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (evt) => callback(evt.target.result);
+                        reader.readAsDataURL(file);
+                    }
+                };
+            }
+            return container;
+        }
+
+        function updateResult(itemIndex, qIndex, result) {
+            state.testItems[itemIndex].audit[qIndex].status = result;
+            if (result === true) { 
+                // 如果合格，清空图片
+                state.testItems[itemIndex].audit[qIndex].beforeImg = null; 
+                state.testItems[itemIndex].audit[qIndex].afterImg = null; 
+            }
+            renderTestStep(); // 重新渲染当前项的UI
+            updateProgress();
+            updateNavigationButtons();
+        }
+
+        function updateProgress() {
+            const completedItems = state.testItems.filter(item => item.audit.every(a => a.status !== null)).length;
+            document.getElementById('progress-text').textContent = `${completedItems}/${state.testItems.length} 项已完成`;
+            document.getElementById('progress-bar').style.width = `${(completedItems / state.testItems.length) * 100}%`;
+        }
+        
+        function updateNavigationButtons() {
+            const currentItem = state.testItems[state.currentItemIndex];
+            const isCurrentItemComplete = currentItem.audit.every(a => a.status !== null);
+            const isLastItem = state.currentItemIndex === state.testItems.length - 1;
+            const btnNext = document.getElementById('btn-next');
+            const btnPrevious = document.getElementById('btn-previous');
+
+            // 上一个按钮逻辑
+            btnPrevious.disabled = state.currentItemIndex === 0;
+
+            // 下一个按钮逻辑
+            btnNext.disabled = !isCurrentItemComplete;
+
+            // 按钮文本和颜色
+            if (isLastItem && isCurrentItemComplete) {
+                btnNext.textContent = "完成测试";
+                btnNext.classList.remove('bg-gray-400', 'bg-blue-600', 'hover:bg-blue-700');
+                btnNext.classList.add('bg-green-600', 'hover:bg-green-700');
+            } else if (isCurrentItemComplete) {
+                btnNext.textContent = "下一个";
+                btnNext.classList.remove('bg-gray-400', 'bg-green-600', 'hover:bg-green-700');
+                btnNext.classList.add('bg-blue-600', 'hover:bg-blue-700');
+            } else {
+                btnNext.textContent = "下一个";
+                btnNext.classList.add('bg-gray-400');
+                btnNext.classList.remove('bg-blue-600', 'hover:bg-blue-700', 'bg-green-600', 'hover:bg-green-700');
+            }
+        }
+
+        function nextItem() {
+            const currentItem = state.testItems[state.currentItemIndex];
+            // 再次校验是否完成，防止有人绕过禁用状态
+            if (!currentItem.audit.every(a => a.status !== null)) {
+                showMessageBox("警告", "请先完成当前产品的全部检查项再进入下一项。");
+                return;
+            }
+
+            if (state.currentItemIndex < state.testItems.length - 1) {
+                state.currentItemIndex++;
+                renderTestStep();
+            } else {
+                finishAudit();
+            }
+        }
+
+        function previousItem() {
+            if (state.currentItemIndex > 0) {
+                state.currentItemIndex--;
+                renderTestStep();
+            }
+        }
+
+        // 保持不变的流程函数
+        function finishAudit() {
+            state.currentStep = 3;
+            document.getElementById('step-2').classList.add('hidden');
+            document.getElementById('audit-footer').classList.add('hidden');
+            document.getElementById('step-3').classList.remove('hidden');
+            document.getElementById('step-indicator').textContent = "完成";
+            document.getElementById('step-indicator').className = "text-xs bg-green-600 px-2 py-1 rounded";
+        }
+
+        function backToEdit() {
+            state.currentStep = 2;
+            document.getElementById('step-3').classList.add('hidden');
+            document.getElementById('step-2').classList.remove('hidden');
+            document.getElementById('audit-footer').classList.remove('hidden');
+            document.getElementById('step-indicator').textContent = "进行中";
+            document.getElementById('step-indicator').className = "text-xs bg-orange-500 px-2 py-1 rounded";
+            renderTestStep(); // 返回时重新渲染当前项
+        }
+
+        function resetApp() { 
+            showMessageBox("确认重置", "确定要重置所有测试数据吗？", () => location.reload()); 
+        }
+
+        function exportReport() {
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('report-date').textContent = new Date().toLocaleDateString();
+            document.getElementById('report-hfb').textContent = state.selectedHFB;
+            
+            let passedCount = 0; let failCount = 0;
+            const detailsContainer = document.getElementById('report-details');
+            detailsContainer.innerHTML = '';
+
+            state.testItems.forEach((item, idx) => {
+                const hasIssues = item.audit.some(a => a.status === false);
+                if (hasIssues) failCount++; else passedCount++;
+                const itemDiv = document.createElement('div');
+                itemDiv.className = "border rounded-lg overflow-hidden break-inside-avoid";
+                const headerClass = hasIssues ? "bg-red-50 border-b border-red-100" : "bg-green-50 border-b border-green-100";
+                const iconClass = hasIssues ? "text-red-500 fa-exclamation-circle" : "text-green-500 fa-check-circle";
+                
+                let content = `<div class="${headerClass} p-3 flex justify-between items-center"><div><span class="text-xs text-gray-500 block">Product ${idx + 1} (${item.product.articleNo})</span><span class="font-bold text-gray-800">${item.product.name}</span></div><i class="fas ${iconClass} text-xl"></i></div>`;
+
+                if (hasIssues) {
+                    let issuesHTML = '<div class="p-3 bg-white space-y-4">';
+                    item.audit.forEach(q => {
+                        if (q.status === false) {
+                            issuesHTML += `<div class="text-sm"><div class="text-red-700 font-medium mb-2"><i class="fas fa-times mr-1"></i> ${q.question}</div><div class="grid grid-cols-2 gap-2"><div class="border rounded p-1 text-center"><div class="h-32 bg-gray-100 flex items-center justify-center overflow-hidden mb-1">${q.beforeImg ? `<img src="${q.beforeImg}" class="h-full w-full object-contain">` : '<span class="text-gray-400">未上传</span>'}</div><span class="text-xs font-bold bg-gray-200 px-2 py-1 rounded">BEFORE</span></div><div class="border rounded p-1 text-center"><div class="h-32 bg-gray-100 flex items-center justify-center overflow-hidden mb-1">${q.afterImg ? `<img src="${q.afterImg}" class="h-full w-full object-contain">` : '<span class="text-gray-400">未上传</span>'}</div><span class="text-xs font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded">AFTER</span></div></div></div>`;
+                        }
+                    });
+                    content += issuesHTML + '</div>';
+                } else {
+                    // 修复文本截断问题
+                    content += `<div class="p-4 text-sm font-medium text-green-700 bg-white text-center">所有检查项目合格</div>`;
+                }
+                itemDiv.innerHTML = content;
+                detailsContainer.appendChild(itemDiv);
+            });
+
+            document.getElementById('report-pass').textContent = passedCount;
+            document.getElementById('report-fail').textContent = failCount;
+            const reportCanvas = document.getElementById('report-canvas');
+            
+            // 使用 html2canvas
+            html2canvas(reportCanvas, { 
+                scale: 2, 
+                useCORS: true,
+                logging: false, // 避免过多日志
+            }).then(canvas => {
+                const link = document.createElement('a');
+                link.download = `Buying_Test_${state.selectedHFB.replace(/\s/g, '_')}_${new Date().getTime()}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+                document.getElementById('loading').classList.add('hidden');
+                
+                // 导出逻辑优化：提示用户手动保存到相册
+                showMessageBox(
+                    "保存指南 (重要)", 
+                    "出于安全限制，图片已自动下载到您的手机**文件**或**下载**文件夹中。<br><br>请您手动前往该文件夹找到图片，然后选择**保存到相册/图库**。",
+                    null,
+                    "知道了"
+                );
+
+            }).catch(err => {
+                console.error("HTML2Canvas Error:", err);
+                // 使用自定义模态框替代 alert
+                showMessageBox("导出失败", "生成报告时出错，可能是图片加载失败或浏览器兼容性问题。", null, "知道了");
+                document.getElementById('loading').classList.add('hidden');
+            });
+        }
+        
+        // --- Custom Alert/Confirm Message Box ---
+        function showMessageBox(title, message, onConfirm = null, confirmText = "确定", cancelText = "取消") {
+            const modalId = 'custom-modal';
+            let modal = document.getElementById(modalId);
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = modalId;
+                modal.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-50 transition-opacity duration-300";
+                document.body.appendChild(modal);
+            }
+
+            modal.innerHTML = `
+                <div class="bg-white rounded-lg shadow-xl w-11/12 max-w-sm mx-auto overflow-hidden transform transition-all duration-300 scale-95 opacity-0">
+                    <div class="p-4 border-b">
+                        <h3 class="text-lg font-bold text-gray-800">${title}</h3>
+                    </div>
+                    <div class="p-4">
+                        <p class="text-sm text-gray-600">${message}</p>
+                    </div>
+                    <div class="p-4 border-t flex justify-end space-x-3">
+                        ${onConfirm ? `<button id="modal-cancel" class="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200">${cancelText}</button>` : ''}
+                        <button id="modal-confirm" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded hover:bg-blue-700">${confirmText}</button>
+                    </div>
+                </div>
+            `;
+
+            // Animate In
+            setTimeout(() => {
+                modal.querySelector('div').classList.remove('scale-95', 'opacity-0');
+                modal.querySelector('div').classList.add('scale-100', 'opacity-100');
+                modal.style.opacity = '1';
+            }, 10);
+
+            const close = () => {
+                modal.querySelector('div').classList.remove('scale-100', 'opacity-100');
+                modal.querySelector('div').classList.add('scale-95', 'opacity-0');
+                modal.style.opacity = '0';
+                setTimeout(() => modal.remove(), 300);
+            };
+
+            document.getElementById('modal-confirm').onclick = () => {
+                close();
+                if (onConfirm) onConfirm();
+            };
+            
+            if (onConfirm) {
+                document.getElementById('modal-cancel').onclick = close;
+            }
+        }
+    </script>
+</body>
+</html>
+
